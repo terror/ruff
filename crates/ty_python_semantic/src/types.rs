@@ -5573,7 +5573,7 @@ impl<'db> Type<'db> {
         &self,
         db: &'db dyn Db,
         scope_id: ScopeId<'db>,
-        typevar_binding_context: Option<Definition<'db>>,
+        typevar_binding_context: Option<BindingContext<'db>>,
     ) -> Result<Type<'db>, InvalidTypeExpressionError<'db>> {
         match self {
             // Special cases for `float` and `complex`
@@ -6054,7 +6054,7 @@ impl<'db> Type<'db> {
                     partial.get(db, bound_typevar).unwrap_or(self)
                 }
                 TypeMapping::MarkTypeVarsInferable(binding_context) => {
-                    if binding_context.is_none_or(|context| context == bound_typevar.binding_context(db)) {
+                    if binding_context.is_none_or(|context| Some(context) == bound_typevar.binding_context(db).definition()) {
                         Type::TypeVar(bound_typevar.mark_typevars_inferable(db, visitor))
                     } else {
                         self
@@ -6258,7 +6258,7 @@ impl<'db> Type<'db> {
                     bound_typevar.typevar(db).kind(db),
                     TypeVarKind::Legacy | TypeVarKind::TypingSelf
                 ) && binding_context.is_none_or(|binding_context| {
-                    bound_typevar.binding_context(db) == BindingContext::Definition(binding_context)
+                    bound_typevar.binding_context(db).definition() == Some(binding_context)
                 }) {
                     typevars.insert(bound_typevar);
                 }
@@ -6749,7 +6749,7 @@ pub enum TypeMapping<'a, 'db> {
     /// When the parameter is set to `None`, *all* type variables will be marked as inferable. We use this
     /// variant when descending into the bounds and/or constraints, and the default value of a type variable,
     /// which may include nested type variables (`Self` has a bound of `C[T]` for a generic class `C[T]`).
-    MarkTypeVarsInferable(Option<BindingContext<'db>>),
+    MarkTypeVarsInferable(Option<Definition<'db>>),
     /// Create the top or bottom materialization of a type.
     Materialize(MaterializationKind),
 }
@@ -7499,9 +7499,9 @@ impl<'db> TypeVarInstance<'db> {
     pub(crate) fn with_binding_context(
         self,
         db: &'db dyn Db,
-        binding_context: Definition<'db>,
+        binding_context: BindingContext<'db>,
     ) -> BoundTypeVarInstance<'db> {
-        BoundTypeVarInstance::new(db, self, BindingContext::Definition(binding_context))
+        BoundTypeVarInstance::new(db, self, binding_context)
     }
 
     pub(crate) fn is_self(self, db: &'db dyn Db) -> bool {
@@ -7726,19 +7726,29 @@ fn lazy_bound_cycle_initial<'db>(
 /// Where a type variable is bound and usable.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, salsa::Update, get_size2::GetSize)]
 pub enum BindingContext<'db> {
-    /// The definition of the generic class, function, or type alias that binds this typevar.
-    Definition(Definition<'db>),
+    /// The definition of the generic class that binds this typevar.
+    Class(Definition<'db>),
+    /// The definition of the generic function that binds this typevar.
+    Function(Definition<'db>),
+    /// The definition of the generic type alias that binds this typevar.
+    TypeAlias(Definition<'db>),
     /// The typevar is synthesized internally, and is not associated with a particular definition
     /// in the source, but is still bound and eligible for specialization inference.
     Synthetic,
 }
 
 impl<'db> BindingContext<'db> {
-    fn name(self, db: &'db dyn Db) -> Option<String> {
+    fn definition(self) -> Option<Definition<'db>> {
         match self {
-            BindingContext::Definition(definition) => definition.name(db),
+            BindingContext::Class(definition)
+            | BindingContext::Function(definition)
+            | BindingContext::TypeAlias(definition) => Some(definition),
             BindingContext::Synthetic => None,
         }
+    }
+
+    fn name(self, db: &'db dyn Db) -> Option<String> {
+        self.definition().and_then(|definition| definition.name(db))
     }
 }
 
@@ -7807,7 +7817,9 @@ impl<'db> BoundTypeVarInstance<'db> {
         match self.typevar(db).explicit_variance(db) {
             Some(explicit_variance) => explicit_variance.compose(polarity),
             None => match self.binding_context(db) {
-                BindingContext::Definition(definition) => {
+                BindingContext::Class(definition)
+                | BindingContext::Function(definition)
+                | BindingContext::TypeAlias(definition) => {
                     let type_inference = infer_definition_types(db, definition);
                     type_inference
                         .binding_type(definition)
@@ -9921,7 +9933,12 @@ impl<'db> PEP695TypeAliasType<'db> {
             .map(|type_params| {
                 let index = semantic_index(db, scope.file(db));
                 let definition = index.expect_single_definition(type_alias_stmt_node);
-                GenericContext::from_type_params(db, index, definition, type_params)
+                GenericContext::from_type_params(
+                    db,
+                    index,
+                    BindingContext::TypeAlias(definition),
+                    type_params,
+                )
             })
     }
 

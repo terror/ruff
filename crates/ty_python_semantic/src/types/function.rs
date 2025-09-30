@@ -77,8 +77,8 @@ use crate::types::narrow::ClassInfoConstraintFunction;
 use crate::types::signatures::{CallableSignature, Signature};
 use crate::types::visitor::any_over_type;
 use crate::types::{
-    ApplyTypeMappingVisitor, BoundMethodType, BoundTypeVarInstance, CallableType, ClassBase,
-    ClassLiteral, ClassType, DeprecatedInstance, DynamicType, FindLegacyTypeVarsVisitor,
+    ApplyTypeMappingVisitor, BindingContext, BoundMethodType, BoundTypeVarInstance, CallableType,
+    ClassBase, ClassLiteral, ClassType, DeprecatedInstance, DynamicType, FindLegacyTypeVarsVisitor,
     HasRelationToVisitor, IsEquivalentVisitor, KnownClass, KnownInstanceType, NormalizedVisitor,
     SpecialFormType, TrackedConstraintSet, Truthiness, Type, TypeMapping, TypeRelation,
     UnionBuilder, all_members, binding_type, todo_type, walk_signature,
@@ -401,7 +401,12 @@ impl<'db> OverloadLiteral<'db> {
         let definition = self.definition(db);
         let index = semantic_index(db, scope.file(db));
         let generic_context = function_stmt_node.type_params.as_ref().map(|type_params| {
-            GenericContext::from_type_params(db, index, definition, type_params)
+            GenericContext::from_type_params(
+                db,
+                index,
+                BindingContext::Function(definition),
+                type_params,
+            )
         });
         let file_scope_id = scope.file_scope_id(db);
         let is_generator = file_scope_id.is_generator_function(index);

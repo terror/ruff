@@ -88,11 +88,11 @@ use crate::types::typed_dict::{
 };
 use crate::types::visitor::any_over_type;
 use crate::types::{
-    BoundTypeVarInstance, CallDunderError, CallableType, ClassLiteral, ClassType, DataclassParams,
-    DynamicType, IntersectionBuilder, IntersectionType, KnownClass, KnownInstanceType,
-    MemberLookupPolicy, MetaclassCandidate, PEP695TypeAliasType, Parameter, ParameterForm,
-    Parameters, SpecialFormType, SubclassOfType, TrackedConstraintSet, Truthiness, Type,
-    TypeAliasType, TypeAndQualifiers, TypeContext, TypeQualifiers,
+    BindingContext, BoundTypeVarInstance, CallDunderError, CallableType, ClassLiteral, ClassType,
+    DataclassParams, DynamicType, IntersectionBuilder, IntersectionType, KnownClass,
+    KnownInstanceType, MemberLookupPolicy, MetaclassCandidate, PEP695TypeAliasType, Parameter,
+    ParameterForm, Parameters, SpecialFormType, SubclassOfType, TrackedConstraintSet, Truthiness,
+    Type, TypeAliasType, TypeAndQualifiers, TypeContext, TypeQualifiers,
     TypeVarBoundOrConstraintsEvaluation, TypeVarDefaultEvaluation, TypeVarInstance, TypeVarKind,
     UnionBuilder, UnionType, binding_type, todo_type,
 };
@@ -245,7 +245,7 @@ pub(super) struct TypeInferenceBuilder<'db, 'ast> {
     called_functions: FxHashSet<FunctionType<'db>>,
 
     /// Whether we are in a context that binds unbound typevars.
-    typevar_binding_context: Option<Definition<'db>>,
+    typevar_binding_context: Option<BindingContext<'db>>,
 
     /// The deferred state of inferring types of certain expressions within the region.
     ///
@@ -1723,8 +1723,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             .expect("class type params scope without type params");
 
         let binding_context = self.index.expect_single_definition(class);
-        let previous_typevar_binding_context =
-            self.typevar_binding_context.replace(binding_context);
+        let previous_typevar_binding_context = self
+            .typevar_binding_context
+            .replace(BindingContext::Class(binding_context));
 
         self.infer_type_parameters(type_params);
 
@@ -1759,8 +1760,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             .expect("function type params scope without type params");
 
         let binding_context = self.index.expect_single_definition(function);
-        let previous_typevar_binding_context =
-            self.typevar_binding_context.replace(binding_context);
+        let previous_typevar_binding_context = self
+            .typevar_binding_context
+            .replace(BindingContext::Function(binding_context));
         self.infer_return_type_annotation(
             function.returns.as_deref(),
             self.defer_annotations().into(),
@@ -1777,8 +1779,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             .expect("type alias type params scope without type params");
 
         let binding_context = self.index.expect_single_definition(type_alias);
-        let previous_typevar_binding_context =
-            self.typevar_binding_context.replace(binding_context);
+        let previous_typevar_binding_context = self
+            .typevar_binding_context
+            .replace(BindingContext::TypeAlias(binding_context));
         self.infer_type_parameters(type_params);
         self.typevar_binding_context = previous_typevar_binding_context;
     }
@@ -2111,8 +2114,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             if self.defer_annotations() {
                 self.deferred.insert(definition);
             } else {
-                let previous_typevar_binding_context =
-                    self.typevar_binding_context.replace(definition);
+                let previous_typevar_binding_context = self
+                    .typevar_binding_context
+                    .replace(BindingContext::Function(definition));
                 self.infer_return_type_annotation(
                     returns.as_deref(),
                     DeferredExpressionState::None,
@@ -2534,8 +2538,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             if self.in_stub() || class_node.bases().iter().any(contains_string_literal) {
                 self.deferred.insert(definition);
             } else {
-                let previous_typevar_binding_context =
-                    self.typevar_binding_context.replace(definition);
+                let previous_typevar_binding_context = self
+                    .typevar_binding_context
+                    .replace(BindingContext::Class(definition));
                 for base in class_node.bases() {
                     self.infer_expression(base, TypeContext::default());
                 }
@@ -2549,7 +2554,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         definition: Definition<'db>,
         function: &ast::StmtFunctionDef,
     ) {
-        let previous_typevar_binding_context = self.typevar_binding_context.replace(definition);
+        let previous_typevar_binding_context = self
+            .typevar_binding_context
+            .replace(BindingContext::Function(definition));
         self.infer_return_type_annotation(
             function.returns.as_deref(),
             DeferredExpressionState::Deferred,
@@ -2559,7 +2566,9 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
     }
 
     fn infer_class_deferred(&mut self, definition: Definition<'db>, class: &ast::StmtClassDef) {
-        let previous_typevar_binding_context = self.typevar_binding_context.replace(definition);
+        let previous_typevar_binding_context = self
+            .typevar_binding_context
+            .replace(BindingContext::Class(definition));
         for base in class.bases() {
             if self.in_stub() {
                 self.infer_expression_with_state(

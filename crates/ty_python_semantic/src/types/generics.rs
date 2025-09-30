@@ -14,10 +14,11 @@ use crate::types::instance::{Protocol, ProtocolInstanceType};
 use crate::types::signatures::{Parameter, Parameters, Signature};
 use crate::types::tuple::{TupleSpec, TupleType, walk_tuple_type};
 use crate::types::{
-    ApplyTypeMappingVisitor, BoundTypeVarInstance, ClassLiteral, FindLegacyTypeVarsVisitor,
-    HasRelationToVisitor, IsEquivalentVisitor, KnownClass, KnownInstanceType, MaterializationKind,
-    NormalizedVisitor, Type, TypeMapping, TypeRelation, TypeVarBoundOrConstraints, TypeVarInstance,
-    TypeVarKind, TypeVarVariance, UnionType, binding_type, declaration_type,
+    ApplyTypeMappingVisitor, BindingContext, BoundTypeVarInstance, ClassLiteral,
+    FindLegacyTypeVarsVisitor, HasRelationToVisitor, IsEquivalentVisitor, KnownClass,
+    KnownInstanceType, MaterializationKind, NormalizedVisitor, Type, TypeMapping, TypeRelation,
+    TypeVarBoundOrConstraints, TypeVarInstance, TypeVarKind, TypeVarVariance, UnionType,
+    binding_type, declaration_type,
 };
 use crate::{Db, FxOrderSet};
 
@@ -75,7 +76,7 @@ pub(crate) fn bind_typevar<'db>(
     db: &'db dyn Db,
     index: &SemanticIndex<'db>,
     containing_scope: FileScopeId,
-    typevar_binding_context: Option<Definition<'db>>,
+    typevar_binding_context: Option<BindingContext<'db>>,
     typevar: TypeVarInstance<'db>,
 ) -> Option<BoundTypeVarInstance<'db>> {
     // typing.Self is treated like a legacy typevar, but doesn't follow the same scoping rules. It is always bound to the outermost method in the containing class.
@@ -84,7 +85,9 @@ pub(crate) fn bind_typevar<'db>(
             if outer.kind().is_class() {
                 if let NodeWithScopeKind::Function(function) = inner.node() {
                     let definition = index.expect_single_definition(function);
-                    return Some(typevar.with_binding_context(db, definition));
+                    return Some(
+                        typevar.with_binding_context(db, BindingContext::Function(definition)),
+                    );
                 }
             }
         }
@@ -102,7 +105,7 @@ pub(crate) fn bind_typevar<'db>(
 pub(crate) fn typing_self<'db>(
     db: &'db dyn Db,
     scope_id: ScopeId,
-    typevar_binding_context: Option<Definition<'db>>,
+    typevar_binding_context: Option<BindingContext<'db>>,
     class: ClassLiteral<'db>,
     typevar_to_type: &impl Fn(BoundTypeVarInstance<'db>) -> Type<'db>,
 ) -> Option<Type<'db>> {
@@ -167,7 +170,7 @@ impl<'db> GenericContext<'db> {
     pub(crate) fn from_type_params(
         db: &'db dyn Db,
         index: &'db SemanticIndex<'db>,
-        binding_context: Definition<'db>,
+        binding_context: BindingContext<'db>,
         type_params_node: &ast::TypeParams,
     ) -> Self {
         let variables = type_params_node.iter().filter_map(|type_param| {
@@ -200,7 +203,7 @@ impl<'db> GenericContext<'db> {
     fn variable_from_type_param(
         db: &'db dyn Db,
         index: &'db SemanticIndex<'db>,
-        binding_context: Definition<'db>,
+        binding_context: BindingContext<'db>,
         type_param_node: &ast::TypeParam,
     ) -> Option<BoundTypeVarInstance<'db>> {
         match type_param_node {

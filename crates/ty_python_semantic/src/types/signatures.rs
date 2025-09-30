@@ -402,12 +402,7 @@ impl<'db> Signature<'db> {
         );
         let return_ty = function_node.returns.as_ref().map(|returns| {
             let plain_return_ty = definition_expression_type(db, definition, returns.as_ref())
-                .apply_type_mapping(
-                    db,
-                    &TypeMapping::MarkTypeVarsInferable(Some(BindingContext::Definition(
-                        definition,
-                    ))),
-                );
+                .apply_type_mapping(db, &TypeMapping::MarkTypeVarsInferable(Some(definition)));
             if function_node.is_async && !is_generator {
                 KnownClass::CoroutineType
                     .to_specialized_instance(db, [Type::any(), Type::any(), plain_return_ty])
@@ -1238,7 +1233,7 @@ impl<'db> Parameters<'db> {
                     || class.known(db).is_some_and(KnownClass::is_fallback_class)
                 {
                     let scope_id = definition.scope(db);
-                    let typevar_binding_context = Some(definition);
+                    let typevar_binding_context = Some(BindingContext::Function(definition));
                     let index = semantic_index(db, scope_id.file(db));
                     let class = nearest_enclosing_class(db, index, scope_id).unwrap();
 
@@ -1665,12 +1660,8 @@ impl<'db> Parameter<'db> {
     ) -> Self {
         Self {
             annotated_type: parameter.annotation().map(|annotation| {
-                definition_expression_type(db, definition, annotation).apply_type_mapping(
-                    db,
-                    &TypeMapping::MarkTypeVarsInferable(Some(BindingContext::Definition(
-                        definition,
-                    ))),
-                )
+                definition_expression_type(db, definition, annotation)
+                    .apply_type_mapping(db, &TypeMapping::MarkTypeVarsInferable(Some(definition)))
             }),
             kind,
             form: ParameterForm::Value,
