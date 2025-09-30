@@ -40,6 +40,7 @@ pub(crate) struct InferContext<'db, 'ast> {
     module: &'ast ParsedModuleRef,
     diagnostics: std::cell::RefCell<TypeCheckDiagnostics>,
     no_type_check: InNoTypeCheck,
+    multi_inference: bool,
     bomb: DebugDropBomb,
 }
 
@@ -50,6 +51,7 @@ impl<'db, 'ast> InferContext<'db, 'ast> {
             scope,
             module,
             file: scope.file(db),
+            multi_inference: false,
             diagnostics: std::cell::RefCell::new(TypeCheckDiagnostics::default()),
             no_type_check: InNoTypeCheck::default(),
             bomb: DebugDropBomb::new(
@@ -131,7 +133,21 @@ impl<'db, 'ast> InferContext<'db, 'ast> {
         lint: &'static LintMetadata,
         ranged: T,
     ) -> Option<LintDiagnosticGuardBuilder<'ctx, 'db>> {
-        LintDiagnosticGuardBuilder::new(self, lint, ranged.range())
+        LintDiagnosticGuardBuilder::new(self, lint, ranged.range(), false)
+    }
+
+    /// Similar to `report_lint`, except forces the diagnostic to be
+    /// reported even when inferring an expression multiple times.
+    ///
+    /// This should be used for diagnostics that are affected by bidirectional
+    /// type context, which may change across multiple inferences of a function
+    /// argument expression.
+    pub(super) fn report_bidirectional_lint<'ctx, T: Ranged>(
+        &'ctx self,
+        lint: &'static LintMetadata,
+        ranged: T,
+    ) -> Option<LintDiagnosticGuardBuilder<'ctx, 'db>> {
+        LintDiagnosticGuardBuilder::new(self, lint, ranged.range(), true)
     }
 
     /// Optionally return a builder for a diagnostic guard.
@@ -153,7 +169,33 @@ impl<'db, 'ast> InferContext<'db, 'ast> {
         id: DiagnosticId,
         severity: Severity,
     ) -> Option<DiagnosticGuardBuilder<'ctx, 'db>> {
-        DiagnosticGuardBuilder::new(self, id, severity)
+        DiagnosticGuardBuilder::new(self, id, severity, false)
+    }
+
+    /// Similar to `report_diagnostic`, except forces the diagnostic to be
+    /// reported even when inferring an expression multiple times.
+    ///
+    /// This should be used for diagnostics that are affected by bidirectional
+    /// type context, which may change across multiple inferences of a function
+    /// argument expression.
+    #[allow(dead_code)]
+    pub(super) fn report_bidirectional_diagnostic<'ctx>(
+        &'ctx self,
+        id: DiagnosticId,
+        severity: Severity,
+    ) -> Option<DiagnosticGuardBuilder<'ctx, 'db>> {
+        DiagnosticGuardBuilder::new(self, id, severity, true)
+    }
+
+    /// Returns `true` if the current expression is being inferred for a second
+    /// (or subsequent) time, with a potentially different bidirectional type
+    /// context.
+    fn is_in_multi_inference(&self) -> bool {
+        self.multi_inference
+    }
+
+    pub(super) fn set_multi_inference(&mut self, multi_inference: bool) {
+        self.multi_inference = multi_inference;
     }
 
     pub(super) fn set_in_no_type_check(&mut self, no_type_check: InNoTypeCheck) {
@@ -386,6 +428,7 @@ impl<'db, 'ctx> LintDiagnosticGuardBuilder<'db, 'ctx> {
         ctx: &'ctx InferContext<'db, 'ctx>,
         lint: &'static LintMetadata,
         range: TextRange,
+        bidirectional: bool,
     ) -> Option<LintDiagnosticGuardBuilder<'db, 'ctx>> {
         // The comment below was copied from the original
         // implementation of diagnostic reporting. The code
@@ -408,6 +451,12 @@ impl<'db, 'ctx> LintDiagnosticGuardBuilder<'db, 'ctx> {
         // If we're not in type checking mode,
         // we can bail now.
         if ctx.is_in_no_type_check() {
+            return None;
+        }
+        // If this lint is being reported as part of multi-inference of a given expression,
+        // silence it to avoid duplicated diagnostics, unless it may have been affected by
+        // the bidirectional type context.
+        if ctx.is_in_multi_inference() && !bidirectional {
             return None;
         }
         let id = DiagnosticId::Lint(lint.name());
@@ -571,8 +620,15 @@ impl<'db, 'ctx> DiagnosticGuardBuilder<'db, 'ctx> {
         ctx: &'ctx InferContext<'db, 'ctx>,
         id: DiagnosticId,
         severity: Severity,
+        bidirectional: bool,
     ) -> Option<DiagnosticGuardBuilder<'db, 'ctx>> {
         if !ctx.db.should_check_file(ctx.file) {
+            return None;
+        }
+        // If this lint is being reported as part of multi-inference of a given expression,
+        // silence it to avoid duplicated diagnostics, unless it may have been affected by
+        // the bidirectional type context.
+        if ctx.is_in_multi_inference() && !bidirectional {
             return None;
         }
         Some(DiagnosticGuardBuilder { ctx, id, severity })

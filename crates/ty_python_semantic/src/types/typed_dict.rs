@@ -183,8 +183,8 @@ pub(super) fn validate_typed_dict_key_assignment<'db, 'ast>(
 
     if assignment_kind.is_subscript() && item.is_read_only() {
         if report_diagnostics
-            && let Some(builder) =
-                context.report_lint(assignment_kind.diagnostic_type(), key_node.into())
+            && let Some(builder) = context
+                .report_bidirectional_lint(assignment_kind.diagnostic_type(), key_node.into())
         {
             let typed_dict_ty = Type::TypedDict(typed_dict);
             let typed_dict_d = typed_dict_ty.display(db);
@@ -215,7 +215,7 @@ pub(super) fn validate_typed_dict_key_assignment<'db, 'ast>(
     // Invalid assignment - emit diagnostic
     if report_diagnostics
         && let Some(builder) =
-            context.report_lint(assignment_kind.diagnostic_type(), value_node.into())
+            context.report_bidirectional_lint(assignment_kind.diagnostic_type(), value_node.into())
     {
         let typed_dict_ty = Type::TypedDict(typed_dict);
         let typed_dict_d = typed_dict_ty.display(db);

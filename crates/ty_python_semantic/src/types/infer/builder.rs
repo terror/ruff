@@ -4993,7 +4993,10 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
             // Otherwise, we infer the type of each argument once for each matching overload signature,
             // with the given annotated type as type context.
-            for binding in bindings {
+            //
+            // TODO: De-duplicate the type contexts to avoid inferring the same expression multiple times
+            // with the same type context.
+            for (binding_index, binding) in bindings.into_iter().enumerate() {
                 let argument_index = if binding.bound_type.is_some() {
                     argument_index + 1
                 } else {
@@ -5037,7 +5040,11 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                 let old_multi_inference_state =
                     mem::replace(&mut self.multi_inference_state, multi_inference_state);
 
-                for overload in overloads {
+                for (overload_index, overload) in overloads.into_iter().enumerate() {
+                    if (binding_index, overload_index) != (0, 0) {
+                        self.context.set_multi_inference(true);
+                    }
+
                     let argument_matches = &overload.argument_matches()[argument_index];
                     let [parameter_index] = argument_matches.parameters.as_slice() else {
                         continue;
@@ -5051,6 +5058,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
                 // Restore the multi-inference state.
                 self.multi_inference_state = old_multi_inference_state;
+                self.context.set_multi_inference(false);
             }
 
             *argument_type = self.try_expression_type(ast_argument);

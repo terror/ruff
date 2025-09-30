@@ -1683,7 +1683,7 @@ def _(arg: tuple[A | B, Any]):
     reveal_type(f(*(arg,)))  # revealed: Unknown
 ```
 
-## Bi-directional Type Inference
+## Bidirectional Type Inference
 
 Type inference accounts for parameter type annotations across all overloads.
 

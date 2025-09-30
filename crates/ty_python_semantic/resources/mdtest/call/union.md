@@ -252,7 +252,12 @@ def _(x: Union[Intersection[Any, Not[int]], Intersection[Any, Not[int]]]):
     reveal_type(x)  # revealed: Any & ~int
 ```
 
-## Bi-directional Type Inference
+## Bidirectional Type Inference
+
+```toml
+[environment]
+python-version = "3.12"
+```
 
 Type inference accounts for parameter type annotations across all signatures in a union.
 
@@ -275,4 +280,30 @@ def _(flag: bool):
     # error: [missing-typed-dict-key] "Missing required key 'x' in TypedDict `T` constructor"
     # error: [invalid-key] "Invalid key access on TypedDict `T`: Unknown key "y""
     f({"y": 1})
+```
+
+Diagnostics unrelated to the type-context are only reported once:
+
+```py
+def f[T](x: T) -> list[T]:
+    return [x]
+
+def a(x: list[bool], y: list[bool]): ...
+def b(x: list[int], y: list[int]): ...
+def c(x: list[int], y: list[int]): ...
+def _(x: int):
+    if x == 0:
+        y = a
+    elif x == 1:
+        y = b
+    else:
+        y = c
+
+    if x == 0:
+        z = True
+
+    y(f(True), [True])
+
+    # error: [possibly-unresolved-reference] "Name `z` used when possibly not defined"
+    y(f(True), [z])
 ```
